@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/InftexMe/static/css/main.1183f576.css",
+    "main.js": "/InftexMe/static/js/main.caae4eac.js",
+    "index.html": "/InftexMe/index.html",
+    "main.1183f576.css.map": "/InftexMe/static/css/main.1183f576.css.map",
+    "main.caae4eac.js.map": "/InftexMe/static/js/main.caae4eac.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.1183f576.css",
+    "static/js/main.caae4eac.js"
+  ]
+}

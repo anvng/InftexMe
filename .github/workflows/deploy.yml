@@ -5,6 +5,12 @@ on:
     branches:
       - main
 
+# Grant write permissions for contents and deployments
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -12,11 +18,11 @@ jobs:
     steps:
       # Checkout code
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       # Set up Node.js
       - name: Set up Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: "18"
           cache: "npm"
@@ -30,8 +36,9 @@ jobs:
         run: npm run build
 
       # Deploy to gh-pages branch
-      - name: Deploy
+      - name: Deploy to GitHub Pages
         uses: JamesIves/github-pages-deploy-action@v4
         with:
           branch: gh-pages
           folder: build
+          token: ${{ secrets.GITHUB_TOKEN }}

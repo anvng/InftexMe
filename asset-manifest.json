@@ -1,13 +1,13 @@
 {
   "files": {
     "main.css": "/InftexMe/static/css/main.1183f576.css",
-    "main.js": "/InftexMe/static/js/main.0a1af0d7.js",
+    "main.js": "/InftexMe/static/js/main.7838d821.js",
     "index.html": "/InftexMe/index.html",
     "main.1183f576.css.map": "/InftexMe/static/css/main.1183f576.css.map",
-    "main.0a1af0d7.js.map": "/InftexMe/static/js/main.0a1af0d7.js.map"
+    "main.7838d821.js.map": "/InftexMe/static/js/main.7838d821.js.map"
   },
   "entrypoints": [
     "static/css/main.1183f576.css",
-    "static/js/main.0a1af0d7.js"
+    "static/js/main.7838d821.js"
   ]
 }

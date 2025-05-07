@@ -12,7 +12,9 @@ import {
   setDoc,
   doc,
   deleteDoc,
-} from 'firebase/firestore';
+  query,
+  where,
+  getDoc } from 'firebase/firestore';
 import dbLocal from './db';
 import { encryptData, decryptData } from './crypto';
 import { Bar, Pie } from 'react-chartjs-2';
@@ -113,71 +115,85 @@ const App = () => {
   );
 
   // Load transactions from local Dexie and Firestore
-  const loadTransactions = useCallback(
-    async (userId) => {
-      if (!userId) {
-        console.error('No userId, skipping transaction load');
-        return;
-      }
-      try {
-        const localTransactions = await dbLocal.transactions.toArray();
-        const querySnapshot = await getDocs(collection(db, 'transactions'));
-        const cloudTransactions = querySnapshot.docs
-          .filter((doc) => doc.data().userId === userId)
-          .map((doc) => ({
-            id: doc.id,
-            ...doc.data(),
-            amount: decryptData(doc.data().amount),
-            amountInVND: decryptData(doc.data().amountInVND),
-            note: decryptData(doc.data().note),
-          }));
-        const allTransactions = [
-          ...localTransactions,
-          ...cloudTransactions.filter(
-            (ct) => !localTransactions.some((lt) => lt.id === ct.id)
-          ),
-        ];
-        setTransactions(allTransactions);
-        checkBudgetLimit(allTransactions);
-      } catch (error) {
-        console.error('Error loading transactions:', error);
-      }
-    },
-    [checkBudgetLimit]
-  );
+  const loadTransactions = useCallback(async (userId) => {
+    if (!userId) return;
+    try {
+      // Load local transactions from Dexie
+      const localTransactions = await dbLocal.transactions.toArray();
+  
+      // Load cloud transactions from Firestore
+      const querySnapshot = await getDocs(
+        query(
+          collection(db, 'transactions'),
+          where('userId', '==', userId)
+        )
+      );
+      const cloudTransactions = querySnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+        amount: decryptData(doc.data().amount),
+        amountInVND: decryptData(doc.data().amountInVND),
+        note: decryptData(doc.data().note),
+      }));
+  
+      // Merge transactions (prefer cloud if duplicate)
+      const allTransactions = [
+        ...cloudTransactions,
+        ...localTransactions.filter(
+          (lt) => !cloudTransactions.some((ct) => ct.id === lt.id)
+        ),
+      ];
+  
+      // Update Dexie with merged transactions
+      await dbLocal.transactions.clear();
+      await dbLocal.transactions.bulkAdd(allTransactions);
+  
+      setTransactions(allTransactions);
+      checkBudgetLimit(allTransactions);
+    } catch (error) {
+      console.error('Error loading transactions:', error);
+    }
+  }, [checkBudgetLimit]);
 
   // Load categories from Firestore
   const loadCategories = useCallback(async (userId) => {
-    if (!userId) {
-      console.error('No userId, skipping category load');
-      setCategories(['Food', 'Shopping', 'Travel']);
-      return;
-    }
+    if (!userId) return;
     try {
-      const querySnapshot = await getDocs(collection(db, 'categories'));
-      const userCategories = querySnapshot.docs
-        .filter((doc) => doc.data().userId === userId)
-        .map((doc) => doc.id);
-      setCategories(
-        userCategories.length ? userCategories : ['Food', 'Shopping', 'Travel']
+      const querySnapshot = await getDocs(
+        query(
+          collection(db, 'categories'),
+          where('userId', '==', userId)
+        )
       );
+      const cloudCategories = querySnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+  
+      // Update Dexie
+      await dbLocal.categories.clear();
+      await dbLocal.categories.bulkAdd(cloudCategories);
+  
+      setCategories(cloudCategories);
     } catch (error) {
       console.error('Error loading categories:', error);
-      setCategories(['Food', 'Shopping', 'Travel']);
     }
   }, []);
 
   // Load settings (budget limit) from Firestore
   const loadSettings = useCallback(async (userId) => {
-    if (!userId) {
-      console.error('No userId, skipping settings load');
-      return;
-    }
+    if (!userId) return;
     try {
-      const docSnap = await getDocs(collection(db, 'settings'));
-      const settings = docSnap.docs.find((doc) => doc.id === userId);
-      if (settings) {
-        setBudgetLimit(settings.data().budgetLimit || 0);
+      const docRef = doc(db, 'settings', userId);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        const settings = docSnap.data();
+        setBudgetLimit(decryptData(settings.budgetLimit) || '');
+        setDarkMode(settings.darkMode || false);
+  
+        // Update Dexie
+        await dbLocal.settings.clear();
+        await dbLocal.settings.put({ id: userId, ...settings });
       }
     } catch (error) {
       console.error('Error loading settings:', error);
@@ -214,55 +230,26 @@ const App = () => {
   };
 
   // Add a new transaction
-  const addTransaction = async (e) => {
-    e.preventDefault();
-    if (!user) return;
-
-    const sanitizedNote = DOMPurify.sanitize(newTransaction.note);
-    const amountInVND =
-      newTransaction.currency === 'USD'
-        ? newTransaction.amount * exchangeRate
-        : newTransaction.amount;
-    const transaction = {
-      date: newTransaction.date,
-      amount: parseFloat(newTransaction.amount),
-      amountInVND: parseFloat(amountInVND),
-      category: newTransaction.category,
-      note: sanitizedNote,
-      type: newTransaction.type,
-      currency: newTransaction.currency,
-      userId: user.uid,
-      id: Date.now().toString(), // Temporary ID for local storage
-    };
-
+  const addTransaction = async (transaction) => {
     const encryptedTransaction = {
       ...transaction,
       amount: encryptData(transaction.amount),
       amountInVND: encryptData(transaction.amountInVND),
       note: encryptData(transaction.note),
+      userId: user.uid,
     };
-
     try {
-      await dbLocal.transactions.add(transaction);
-      const docRef = await addDoc(
-        collection(db, 'transactions'),
-        encryptedTransaction
-      );
-      transaction.id = docRef.id; // Update ID with Firestore ID
-      await dbLocal.transactions.put(transaction);
-      setTransactions([...transactions, transaction]);
-      setNewTransaction({
-        date: moment().format('YYYY-MM-DD'),
-        amount: '',
-        category: '',
-        note: '',
-        type: 'expense',
-        currency: 'VND',
-      });
-      checkBudgetLimit([...transactions, transaction]);
-      setCurrentView('transactions'); // Switch to transaction list after adding
+      // Add to Firestore
+      const docRef = await addDoc(collection(db, 'transactions'), encryptedTransaction);
+      const newTransaction = { id: docRef.id, ...encryptedTransaction };
+  
+      // Add to Dexie
+      await dbLocal.transactions.add(newTransaction);
+  
+      setTransactions((prev) => [...prev, newTransaction]);
+      checkBudgetLimit([...transactions, newTransaction]);
     } catch (error) {
-      alert('Error adding transaction: ' + error.message);
+      console.error('Error adding transaction:', error);
     }
   };
 
@@ -336,14 +323,37 @@ const App = () => {
   };
 
   // Add a new category
-  const addCategory = async (newCategory) => {
-    if (!user || !newCategory) return;
+  const addCategory = async (category) => {
     try {
-      await setDoc(doc(db, 'categories', newCategory), { userId: user.uid });
-      setCategories([...categories, newCategory]);
-      setNewCategory('');
+      const newCategory = { ...category, userId: user.uid };
+      // Add to Firestore
+      const docRef = await addDoc(collection(db, 'categories'), newCategory);
+      const savedCategory = { id: docRef.id, ...newCategory };
+  
+      // Add to Dexie
+      await dbLocal.categories.add(savedCategory);
+  
+      setCategories((prev) => [...prev, savedCategory]);
     } catch (error) {
-      alert('Error adding category: ' + error.message);
+      console.error('Error adding category:', error);
+    }
+  };
+
+  // Save Settings
+  const saveSettings = async (newBudgetLimit, newDarkMode) => {
+    try {
+      const encryptedBudgetLimit = encryptData(newBudgetLimit);
+      const settings = { budgetLimit: encryptedBudgetLimit, darkMode: newDarkMode };
+      // Save to Firestore
+      await setDoc(doc(db, 'settings', user.uid), settings);
+  
+      // Save to Dexie
+      await dbLocal.settings.put({ id: user.uid, ...settings });
+  
+      setBudgetLimit(newBudgetLimit);
+      setDarkMode(newDarkMode);
+    } catch (error) {
+      console.error('Error saving settings:', error);
     }
   };
 
@@ -362,10 +372,7 @@ const App = () => {
   const saveBudgetLimit = async () => {
     if (!user) return;
     try {
-      await setDoc(doc(db, 'settings', user.uid), {
-        budgetLimit,
-        userId: user.uid,
-      });
+      await saveSettings(budgetLimit, darkMode);
       alert('Budget limit saved');
     } catch (error) {
       alert('Error saving budget limit: ' + error.message);
